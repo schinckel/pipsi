@@ -244,6 +244,42 @@ class Repo(object):
                 except (IOError, OSError):
                     pass
 
+    def install_into(self, package, module, editable=False, upgrade=False):
+        module, install_args = self.resolve_package(module)
+        venv_path = self.get_package_path(package)
+
+        if not os.path.isdir(venv_path):
+            click.echo('%s is not installed' % package)
+            return
+
+        from subprocess import Popen
+
+        old_scripts = set(self.find_scripts(venv_path, package))
+
+        args = [os.path.join(venv_path, 'bin', 'pip'), 'install']
+
+        if editable:
+            args.append('--editable')
+
+        if upgrade:
+            args.append('--upgrade')
+
+        if Popen(args + install_args).wait() != 0:
+            click.echo('Failed to install through pip.  Aborting.')
+            return
+
+        scripts = self.find_scripts(venv_path, package)
+        linked_scripts = self.link_scripts(scripts)
+        to_delete = old_scripts - set(x[0] for x in linked_scripts)
+
+        for script_src, script_link in linked_scripts:
+            if script_src in to_delete:
+                try:
+                    click.echo('  Removing old script %s' % script_src)
+                    os.remove(script_link)
+                except (IOError, OSError):
+                    pass
+
     def list_everything(self):
         venvs = {}
 
@@ -355,3 +391,18 @@ def list_cmd(repo):
         click.echo('  Package "%s":' % venv)
         for script in scripts:
             click.echo('    ' + script)
+
+
+@cli.command()
+@click.argument('package')
+@click.argument('module')
+@click.option('--editable', is_flag=True,
+              help='Enable editable installation.  This only works for '
+                   'locally installed packages.')
+@click.option('--upgrade', is_flag=True,
+              help='Upgrade existing module inside package.')
+@pass_repo
+def install_into(repo, package, module, editable, upgrade):
+    """Install the module into the existing package."""
+    if repo.install_into(package, module, editable, upgrade):
+        click.echo('Done!')
